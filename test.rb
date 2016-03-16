@@ -132,17 +132,6 @@ module WithThis
       end
       Expr[VarA[name, rhs]] >> yield(Expr[Var[name]])
     end
-    def self.fromL(rhs, f)
-      name = begin
-        x = Proc.new
-        @_id += 1
-        :"#{x.parameters[0].last}$#{@_id}"
-      rescue 
-        @_id += 1
-        :"_var$#{@_id}"
-      end
-      f[Expr[VarA[name, rhs]]]; f[yield(Expr[Var[name]])]
-    end
     def self.call(rhs, &b)
       self.from(rhs, &b)
     end
@@ -210,6 +199,7 @@ module WithThis
     puts("#{a}:#{b}")
   }
 
+ 
  a = Console.log "Hello world"
  puts output a
  
@@ -217,15 +207,9 @@ module WithThis
  a = require.('fs') do |fs| fs.writeFileSync('1.txt', 'Hello world') end
  puts output a
 
- a =  import(Console) do |console|
-        Var.let 3 do |a|
-           Var.let 5 do |b|
-             console.log a
-             console.log b
-             console.log a + b
-           end
-        end
-     end
-
+ a =  import(Console) do |console| 
+        console.log "Hello"
+        console.log "world"
+      end
  puts output a
 end

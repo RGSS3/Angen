@@ -47,18 +47,20 @@ module Angen
         @obj = obj
         @f   = f
       end
-      def method_missing(sym, *args)
-        @f.call @obj.send(sym, *args)
+      def method_missing(sym, *args, &b)
+        @f.call @obj.send(sym, *args, &b)
       end
+      attr_accessor :f
     end
+    
     def composeObj(obj, f)
       ComposeObject.new(obj, f)
     end
     
-    def reduce_with(op, &f)
+    def reduce_with(op, b = nil, &f)
       a = []
       op = op.to_proc 
-      b = lambda{|u|
+      b ||= lambda{|u|
           if a == []
             a = [u]
           else
@@ -69,14 +71,14 @@ module Angen
       a[0]
     end
     
-    def reduce_with_object(obj, op)
-       reduce_with(op) do |f|
+    def reduce_with_object(obj, op, b = nil)
+       reduce_with(op, b) do |f|
          yield composeObj(obj, f)
        end
     end
     
-    def import(a)
-      reduce_with_object(a, :>>) do |f| yield f end
+    def import(a, b = nil)
+      reduce_with_object(a, :>>, b) do |f| yield f end
     end
     
     
