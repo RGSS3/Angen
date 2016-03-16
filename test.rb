@@ -1,6 +1,7 @@
 require './angen.rb'
 module A
-  extend  Angen
+  extend Angen
+  extend Angen::Util
 module WithThis
     def self.included(a)
       a.extend self
@@ -51,7 +52,6 @@ module WithThis
     def ==(rhs)
       Expr[BExpr[:==, self, rhs]]
     end
-    
     def assign(rhs)
       Expr[BExpr[:"=", self, rhs]]
     end
@@ -132,6 +132,17 @@ module WithThis
       end
       Expr[VarA[name, rhs]] >> yield(Expr[Var[name]])
     end
+    def self.fromL(rhs, f)
+      name = begin
+        x = Proc.new
+        @_id += 1
+        :"#{x.parameters[0].last}$#{@_id}"
+      rescue 
+        @_id += 1
+        :"_var$#{@_id}"
+      end
+      f[Expr[VarA[name, rhs]]]; f[yield(Expr[Var[name]])]
+    end
     def self.call(rhs, &b)
       self.from(rhs, &b)
     end
@@ -139,9 +150,13 @@ module WithThis
       self.from(rhs, &b)
     end
   end
+
   Console = Module.new do
     def self.method_missing(sym, *args)
       Expr.method_missing :"console.#{sym}", *args 
+    end
+    def self.log(*args)
+      Expr.method_missing :"console.log", *args
     end
   end
   
@@ -159,8 +174,8 @@ module WithThis
     when Num,Var then "#{expr.value.value}"
     when Str     then "#{expr.value.value.inspect}"
     when Do      then "#{expr.value[0].list.map{|x| (" "*(indent * 4)) + output(x, indent+1)}.join(";\n")}"
-    when Fn      then "(function(#{expr.value[0].list.map{|x| output x, indent}.join(',')}){\n#{output Expr[expr.value[1]], indent + 1}\n#{" "*((indent)* 4)}})"
-    when FCall   then "#{expr.value[0].value}(#{expr.value[1].list.map{|x| output x}.join(',')})"
+    when Fn      then "(function(#{expr.value[0].list.map{|x| output x,indent}.join(',')}){\n#{output Expr[expr.value[1]], indent + 1}\n#{" "*((indent)* 4)}})"
+    when FCall   then "#{expr.value[0].value}(#{expr.value[1].list.map{|x|output x}.join(',')})"
     when UExpr   then "#{expr.value[0].value.value} #{output expr.value[1]}"
     when BExpr   then "#{output expr.value[1]}#{expr.value[0].value.value}#{output expr.value[2]}"
     when Ret     then "return #{output expr.value[0]}"      
@@ -200,5 +215,17 @@ module WithThis
  
  require = Expr.ffi :require, [Str]
  a = require.('fs') do |fs| fs.writeFileSync('1.txt', 'Hello world') end
+ puts output a
+
+ a =  import(Console) do |console|
+        Var.let 3 do |a|
+           Var.let 5 do |b|
+             console.log a
+             console.log b
+             console.log a + b
+           end
+        end
+     end
+
  puts output a
 end
