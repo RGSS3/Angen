@@ -73,7 +73,7 @@ module Angen
          } 
          return
        end
-        raise ArgumentError.new("Can't implicit making struct when explicit is set") if explicit
+        raise ArgumentError.new("Can't implicit making struct when explicit is set, #{self.class}") if explicit
         raise ArgumentError.new("Wrong number of Arguments #{self.class.to_s} #{rhs.length} #{typelist.length}") if rhs.length != typelist.length
         rhs.each_with_index{|x, i|
           self.send("#{namelist[i]}=", x)
@@ -94,7 +94,7 @@ module Angen
         self.send("#{namelist[i]}=", a)
       end
       define_method(:rewrite) do |&b|
-        b.call(self.class[*namelist.map{|i| send(i).rewrite(&b) }])
+        b.call(self.class.unchecked(*namelist.map{|i|send(i).rewrite(&b) }))
       end
       
       define_method(:match) do |rhs, &b|
@@ -174,8 +174,10 @@ module Angen
         super
       end
       define_method(:match) do |rhs, &b|
-        if self.type === rhs
+        if self.type == rhs
           b.call(self.value)
+        elsif self.class == rhs
+          b.call(self)
         end
         self
       end

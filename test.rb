@@ -2,7 +2,8 @@ require './angen.rb'
 module A
   extend Angen
   extend Angen::Util
-module WithThis
+  extend Angen::MonadicEnv
+  module WithThis
     def self.included(a)
       a.extend self
     end
@@ -23,7 +24,7 @@ module WithThis
          | type.Str(String)                                             \
          | type.Var(Symbol)                                             \
          | type.Lam(Proc)                                               \
-         | type.OpenClass(WithThis)                             \
+         | type.OpenClass(WithThis)                                     \
          | ctore.Arg(Num)                                               \
          | ctor.Do(list.Statements(rec.Expr))                           \
          | ctor.Fn(list.ArgList(rec.Expr), rec.Do)                      \
@@ -35,8 +36,25 @@ module WithThis
          | ctor.VarA(Var, rec.Expr) 
 
 # ------------- Impl -------------------------------------------------
+  pushEnv Angen::MonadicEnv::Identity
+  Extract = lambda{|x| env.extract(x)}
+  Unbind  = lambda{|x| env.unbind(x)}
+  
+  module AutoEnv
+    def method_added(sym)
+      return if @__defining
+      @__defining = true
+      x = instance_method(sym)
+      define_method sym do |*a, &b|
+        Unbind[x.bind(Extract[self]).call(*a.map(&Extract))]
+      end
+      @__defining = false
+    end
+  end
   
   class Expr
+    alias to_str inspect
+    extend AutoEnv
     def +(rhs)
       Expr[BExpr[:+, self, rhs]]
     end
@@ -49,8 +67,8 @@ module WithThis
     def /(rhs)
       Expr[BExpr[:/, self, rhs]]
     end
-    def ==(rhs)
-      Expr[BExpr[:==, self, rhs]]
+    def eq(rhs)
+      Expr[BExpr[:===, self, rhs]]
     end
     def assign(rhs)
       Expr[BExpr[:"=", self, rhs]]
@@ -69,7 +87,7 @@ module WithThis
     end
     def self.fn(a)
       lambda{|*args|
-        Expr[FCall[Var[a], args]]
+        Unbind[Expr[FCall[Var[Extract[a]], args.map{|x| Extract[x]}]]]
       }
     end
     def self.def(fname)
@@ -96,23 +114,27 @@ module WithThis
     def [](rhs)
       Expr[BExpr[:'.', self, rhs]]
     end
-   
+
     def method_missing(sym, *args)
-      Expr.method_missing(:"#{A.output self}.#{sym}", *args)
+      Expr.js(:"#{A.output self}.#{sym}", *args.map{|x| x})
     end
     def self.ffi(name, typeargs)
       t = Angen.T typeargs
       lambda{|*args, &b|
         raise TypeError, "in ffi #{name} #{t} #{args}" if !(t.===(*args))
-        Var.from(Expr.js(name, *args), &b)
+        Var.from(Expr.js(name, *args))
       }
     end
     def self.fun(&block)
       params = block.parameters.map{|x| x.last}.map{|x|
         x[0] == '_' ? x[1..-1] : x
       }
+      env = MyIdentity.new
+      A.pushEnv env
       r = yield(*params.map{|x| Expr[Var[x]]})      
-      Expr[Fn[params, Expr[r].to_statement]]
+      re = Expr[Fn[params, Expr[env.result].to_statement]]
+      A.popEnv
+      re
     end
     
     def []=(a, b)
@@ -120,9 +142,9 @@ module WithThis
     end
   end
   class Var
-     @_id = 10000
-    def self.from(rhs)
-      name = begin
+    @_id = 10000
+    def self.from(rhs, name = nil)
+      name ||= begin
         x = Proc.new
         @_id += 1
         :"#{x.parameters[0].last}$#{@_id}"
@@ -130,22 +152,32 @@ module WithThis
         @_id += 1
         :"_var$#{@_id}"
       end
-      Expr[VarA[name, rhs]] >> yield(Expr[Var[name]])
+      Unbind[Expr[VarA[name, Extract[rhs]]]]
+      Expr[name]
     end
-    def self.call(rhs, &b)
-      self.from(rhs, &b)
+    def self.let(rhs, name = nil, &b) 
+      self.from(rhs, name, &b)
     end
-    def self.let(rhs, &b) 
-      self.from(rhs, &b)
+    def method_missing(sym, *args)
+      if sym.to_s["="]
+        r = sym.to_s.sub(/=/, "")
+        Unbind[Expr[Extract[:"#{@path}.#{r}"]].assign(Extract[args[0]])]
+      else
+        if args.empty? && !block_given?
+          Var[:"#{self.value}.#{sym}"]
+        else
+          Expr.js(:"#{self.value}.#{sym}", *args)
+        end
+      end
     end
   end
 
   Console = Module.new do
     def self.method_missing(sym, *args)
-      Expr.method_missing :"console.#{sym}", *args 
+      Expr.js :"console.#{sym}", *args 
     end
     def self.log(*args)
-      Expr.method_missing :"console.log", *args
+      Expr.js :"console.log", *args
     end
   end
   
@@ -162,15 +194,15 @@ module WithThis
     case expr.value
     when Num,Var then "#{expr.value.value}"
     when Str     then "#{expr.value.value.inspect}"
-    when Do      then "#{expr.value[0].list.map{|x| (" "*(indent * 4)) + output(x, indent+1)}.join(";\n")}"
-    when Fn      then "(function(#{expr.value[0].list.map{|x| output x,indent}.join(',')}){\n#{output Expr[expr.value[1]], indent + 1}\n#{" "*((indent)* 4)}})"
+    when Do      then "#{expr.value[0].list.map{|x| (" "*(indent * 4)) + output(x, indent)}.join(";\n")}"
+    when Fn      then "(function(#{expr.value[0].list.map{|x| output x}.join(',')}){\n#{output Expr[expr.value[1]], indent + 1}\n#{" "*((indent )* 4)}})"
     when FCall   then "#{expr.value[0].value}(#{expr.value[1].list.map{|x|output x}.join(',')})"
     when UExpr   then "#{expr.value[0].value.value} #{output expr.value[1]}"
     when BExpr   then "#{output expr.value[1]}#{expr.value[0].value.value}#{output expr.value[2]}"
     when Ret     then "return #{output expr.value[0]}"      
     when PExpr   then "(#{output expr.value[0]})"
-    when Lam     then output Expr.fun(&expr.value.value), indent
-    when OpenClass then 
+    when Lam     then output Expr.fun(&expr.value.value), indent 
+    when OpenClass then
       klass = expr.value.value
       dummy = klass.new
       met = klass.instance_methods(false)
@@ -188,28 +220,83 @@ module WithThis
   class VarA
     def output(indent = 0)
       match(VarA){|var, expr|
-         return "var #{var.value} = #{A.output expr}"
+         return "var #{var.value} = #{A.output expr, indent}"
       }
     end  
   end
-  a = Expr[BExpr[:+, 3, 5]]
-  a.match(BExpr){|op, a, b|
-    puts"#{a}:#{op}:#{b}"
-  }.match(UExpr){|op, a|
-    puts("#{a}:#{b}")
+  
+  class Local
+    def [](sym)
+      Expr[Var[sym]]
+    end
+    def []=(sym, exp)
+      Expr[VarA[sym, Expr[exp]]]
+    end
+  end
+  
+  def self.local
+    Local.new
+  end
+  
+  class MyIdentity
+    def initialize
+      @things = []
+    end
+    def extract(a)
+      @things.delete_if{|x| x.hash == a.hash}
+      a
+    end
+    def unbind(a)
+      @things << a unless @things.index{|x| x.hash == a.hash}
+      a
+    end
+    def result
+      @things.map{|x| Expr[x].rewrite(&method(:rewrite))}.inject(:>>)
+    end
+    def rewrite(a)
+      a.match(Lam){|l|
+        return Expr.fun(&l.value).rewrite(&method(:rewrite))
+      }.match(Statements){|*u|      
+        if !(Ret === u[-1].value)
+          u[-1] = Expr[Ret.unchecked(u[-1])]
+        end
+        return u
+      }
+      a
+    end
+  end
+  
+  class Global
+    def self.[]=(sym, a)
+       Unbind[Expr[Extract[sym]].assign(Extract[a])]
+    end
+    def initialize(path)
+      @path = path
+    end
+    
+  end
+  
+  def self.run(&b)
+    u = MyIdentity.new
+    ";" + output(u.rewrite(Expr[Lam[b]])) + "();"
+  end
+  
+  
+  window = Var[:'window']
+  puts run {
+      a = Expr[3] + Expr[5]
+      Console.log a
+      a = Var.let ->x{
+          a = Var.let ->x{
+              a = Var.let ->x{
+                  x + 1
+              }
+              x + 2
+          }
+           x + 2
+      }
+      Console.log a
+      window.alert "Hello world"
   }
 
- 
- a = Console.log "Hello world"
- puts output a
- 
- require = Expr.ffi :require, [Str]
- a = require.('fs') do |fs| fs.writeFileSync('1.txt', 'Hello world') end
- puts output a
-
- a =  import(Console) do |console| 
-        console.log "Hello"
-        console.log "world"
-      end
- puts output a
 end
