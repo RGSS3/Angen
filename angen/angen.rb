@@ -15,6 +15,23 @@ module Angen
      def self.| rhs
        Angen.U [self, rhs]  
      end
+     class N < self
+       def initialize(*rhs, &b)
+         if !(rhs.size == 0 && !block_given? || rhs.size == 1 && rhs[0].class == N && !block_given?)
+           raise "Null type has value"
+         end
+       end
+       define_method(:rewrite) do |&b|
+         b.call(self)
+       end
+       define_method(:match) do |rhs, &b|
+        if self.class == rhs
+          b.call
+        end
+        self
+       end
+     end
+     
      class T < self
        class << self
          attr_accessor :typelist, :namelist
@@ -254,7 +271,7 @@ module Angen
             return
           end
         }
-        raise TypeError.new("No such subtype #{rhs} in #{self.class}")
+        raise TypeError.new("No such subtype #{rhs.inspect} in #{self.class}")
       end
       (class << self; self; end).send :define_method, "|" do |rhs|
         case 
@@ -311,6 +328,16 @@ module Angen
     end
   end
   
+    
+  class Optional
+    def initialize(obj)
+      @obj = obj
+    end
+    def method_missing(sym, arg)
+      @obj.const_set(sym, arg | Angen::RootClass::N)
+    end
+  end
+  
   def ctor(pool = self)
     CTor.new pool
   end
@@ -325,5 +352,8 @@ module Angen
   end
   def list(pool = self)
     List.new pool
+  end
+  def optional(pool = self)
+    Optional.new pool
   end
 end

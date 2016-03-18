@@ -18,23 +18,34 @@ module A
     end
   end         
 #---------TEST---------------------------------------------------------------
-  Unary  = I(:+) | I(:-)
-  Binary = I(:+) | I(:-) | I(:*) | I(:/) | I(:"=") | I(:==) | I(:".")
+  Unary  = I(:+) | I(:-) | I(:"!")
+  Binary = I(:+) | I(:-) | I(:*) | I(:/) | I(:"=") | I(:==) | I(:".") | I(:">") | I(:"<") | I(:%) | I(:===)
   Expr   = type.Num(Integer)                                            \
          | type.Str(String)                                             \
          | type.Var(Symbol)                                             \
+         | list.Arr(rec.Expr)                                           \
+         | type.Tr(TrueClass)                                           \
+         | type.Fa(FalseClass)                                          \
          | type.Lam(Proc)                                               \
          | type.OpenClass(WithThis)                                     \
          | ctore.Arg(Num)                                               \
          | ctor.Do(list.Statements(rec.Expr))                           \
-         | ctor.Fn(list.ArgList(rec.Expr), rec.Do)                      \
-         | ctor.FCall(Var, ArgList)                                     \
+         | ctore.Fn(list.ArgList(rec.Expr), rec.Do)                     \
+         | ctore.Block(ArgList, rec.Do)                                 \
+         | ctor.FCall(rec.Expr, ArgList)                                \
          | ctor.UExpr(Unary,  rec.Expr)                                 \
          | ctor.BExpr(Binary, rec.Expr, rec.Expr)                       \
          | ctore.Ret(rec.Expr)                                          \
          | ctore.PExpr(rec.Expr)                                        \
-         | ctor.VarA(Var, rec.Expr) 
-
+         | ctor.VarA(Var, rec.Expr)                                     \
+         | ctor.If(rec.Expr,Block, optional.Block_(Block))              \
+         | ctor.While(rec.Expr,Block)                                   \
+         | ctor.For(rec.Expr, rec.Expr, rec.Expr, Block)                \
+         | ctor.DoWhile(Block, rec.Expr)                                \
+         | ctore.Break()                                                \
+         | ctore.Continue()                                             \
+         
+         
 # ------------- Impl -------------------------------------------------
   pushEnv Angen::MonadicEnv::Identity
   Extract = lambda{|x| env.extract(x)}
@@ -46,7 +57,7 @@ module A
       @__defining = true
       x = instance_method(sym)
       define_method sym do |*a, &b|
-        Unbind[x.bind(Extract[self]).call(*a.map(&Extract))]
+        Unbind[x.bind(Extract[self]).call(*(a + Array(b)).map(&Extract))]
       end
       @__defining = false
     end
@@ -67,6 +78,15 @@ module A
     def /(rhs)
       Expr[BExpr[:/, self, rhs]]
     end
+    def %(rhs)
+      Expr[BExpr[:%, self, rhs]]
+    end
+    def >(rhs)
+      Expr[BExpr[:>, self, rhs]]
+    end
+    def <(rhs)
+      Expr[BExpr[:<, self, rhs]]
+    end
     def eq(rhs)
       Expr[BExpr[:===, self, rhs]]
     end
@@ -85,9 +105,11 @@ module A
       r._0.list += u._0.list
       Expr[r]
     end
+    
+    
     def self.fn(a)
       lambda{|*args|
-        Unbind[Expr[FCall[Var[Extract[a]], args.map{|x| Extract[x]}]]]
+        Unbind[Expr[FCall[Extract[a], args.map{|x| Extract[x]}]]]
       }
     end
     def self.def(fname)
@@ -95,11 +117,15 @@ module A
       args = x.parameters.map{|a| a.last}
       Expr[Do[Statements[[FDecl[fname, args, yield(*args.map{|x| Expr[x]}).to_statement]]]]]
     end
-    def self.method_missing(sym, *args)      
-      fn(sym).call(*args)
+    def self.method_missing(sym, *args, &b)      
+      fn(sym).call(*(args + Array(b)))
     end
-    def self.js(sym, *args)
-      fn(sym).call(*args)
+    def self.js(sym, *args, &b)
+      fn(sym).call(*(args + Array(b)))
+    end
+    
+    def not
+      Expr[UExpr[:'!', Extract[self.paren]]]
     end
     
     def to_statement
@@ -115,8 +141,8 @@ module A
       Expr[BExpr[:'.', self, rhs]]
     end
 
-    def method_missing(sym, *args)
-      Expr.js(:"#{A.output self}.#{sym}", *args.map{|x| x})
+    def method_missing(sym, *args, &b)
+      Expr.js(:"#{A.output self, 0}.#{sym}", *args.map{|x| x})
     end
     def self.ffi(name, typeargs)
       t = Angen.T typeargs
@@ -125,6 +151,26 @@ module A
         Var.from(Expr.js(name, *args))
       }
     end
+    
+    def call(*args, &block)
+      Expr.js(self.paren, *(args + Array(block)).map{|x| x})
+    end
+    
+    def self.if(expr, &block)
+      Unbind[Expr[If[Extract[expr], Extract[self.blk(&block)].value, Angen::RootClass::N[] ]  ]  ]
+    end
+    
+    def self.for(expr1, expr2, expr3, &block)
+      Unbind[Expr[For[Extract[expr1], Extract[expr2], Extract[expr3], Extract[self.blk(&block)].value] ] ]
+    end
+    
+    def else(block)
+      self.value.match(If) do |expr, thenpart, elsepart|
+        return Unbind[Expr[If[Extract[expr], Extract[thenpart], Block_[Extract[Expr.blk(&block)].value ]]  ]  ]
+      end
+      raise 'not an If statement'
+    end
+    
     def self.fun(&block)
       params = block.parameters.map{|x| x.last}.map{|x|
         x[0] == '_' ? x[1..-1] : x
@@ -132,7 +178,19 @@ module A
       env = MyIdentity.new
       A.pushEnv env
       r = yield(*params.map{|x| Expr[Var[x]]})      
-      re = Expr[Fn[params, Expr[env.result].to_statement]]
+      re = Expr[Fn.unchecked(params, Expr[env.result].to_statement)]
+      A.popEnv
+      re
+    end
+    
+    def self.blk(&block)
+      params = block.parameters.map{|x| x.last}.map{|x|
+        x[0] == '_' ? x[1..-1] : x
+      }
+      env = MyIdentity.new
+      A.pushEnv env
+      r = yield(*params.map{|x| Expr[Var[x]]})      
+      re = Expr[Block.unchecked(params, Expr[env.result].to_statement)]
       A.popEnv
       re
     end
@@ -158,15 +216,19 @@ module A
     def self.let(rhs, name = nil, &b) 
       self.from(rhs, name, &b)
     end
-    def method_missing(sym, *args)
+    def method_missing(sym, *args, &b)
       if sym.to_s["="]
         r = sym.to_s.sub(/=/, "")
         Unbind[Expr[Extract[:"#{@path}.#{r}"]].assign(Extract[args[0]])]
       else
-        if args.empty? && !block_given?
-          Var[:"#{self.value}.#{sym}"]
+        if args.empty?
+          if !block_given?
+            Var[:"#{self.value}.#{sym}"]
+          else
+            Expr.js(:"#{self.value}.#{sym}", *(args+Array(b)))
+          end
         else
-          Expr.js(:"#{self.value}.#{sym}", *args)
+          Expr.js(:"#{self.value}.#{sym}", *(args + Array(b)))
         end
       end
     end
@@ -190,18 +252,35 @@ module A
   end
   # 1
 
-  def self.output(expr, indent = 0)
+  def self.output(expr, indent)
     case expr.value
-    when Num,Var then "#{expr.value.value}"
+    when Num,Var, Tr, Fa then "#{expr.value.value}"
     when Str     then "#{expr.value.value.inspect}"
     when Do      then "#{expr.value[0].list.map{|x| (" "*(indent * 4)) + output(x, indent)}.join(";\n")}"
-    when Fn      then "(function(#{expr.value[0].list.map{|x| output x}.join(',')}){\n#{output Expr[expr.value[1]], indent + 1}\n#{" "*((indent )* 4)}})"
-    when FCall   then "#{expr.value[0].value}(#{expr.value[1].list.map{|x|output x}.join(',')})"
-    when UExpr   then "#{expr.value[0].value.value} #{output expr.value[1]}"
-    when BExpr   then "#{output expr.value[1]}#{expr.value[0].value.value}#{output expr.value[2]}"
-    when Ret     then "return #{output expr.value[0]}"      
-    when PExpr   then "(#{output expr.value[0]})"
-    when Lam     then output Expr.fun(&expr.value.value), indent 
+    when Fn      then "(function(#{expr.value[0].list.map{|x| output x, indent}.join(',')}){\n#{output Expr[expr.value[1]], indent + 1}\n#{" "*((indent)* 4)}})"
+    when Block   then "{\n#{output Expr[expr.value[1]], indent + 1}\n#{" "*((indent)* 4)}}"
+    when FCall   then "#{output expr.value[0], indent}(#{expr.value[1].list.map{|x|output x, indent}.join(',')})"
+    when UExpr   then "#{expr.value[0].value.value} #{output expr.value[1], indent}"
+    when BExpr   then "#{output expr.value[1], indent}#{expr.value[0].value.value}#{output expr.value[2], indent}"
+    when Ret     then "return #{output expr.value[0], indent}"      
+    when PExpr   then "(#{output expr.value[0], indent})"
+    when Lam     then output Expr.fun(&expr.value.value), indent
+    when Arr     then "[" + expr.value.list.map{|x| output x}.join(",") + "]" 
+    when Break   then "break"
+    when Continue   then "continue"
+    when For     then
+      expr.value.match(For) do |expr1, expr2, expr3, bl|
+        return "for(#{output expr1, indent+1};#{output expr2, indent+1};#{output expr3, indent+1})#{output Expr[bl], indent + 1}"
+      end  
+    when If      then 
+      a = "if(#{output expr.value[0], indent + 1}) #{output Expr[expr.value[1]], indent + 1}"
+      expr.value[2].value.match(Angen::RootClass::N){
+      }.match(Block){|arg, dost|
+          a << "\n#{" "*(indent * 4)}else #{output Expr[Block.unchecked(arg, dost)], indent + 1}"
+      }
+      
+      a
+    
     when OpenClass then
       klass = expr.value.value
       dummy = klass.new
@@ -261,6 +340,12 @@ module A
           u[-1] = Expr[Ret.unchecked(u[-1])]
         end
         return u
+      }.match(Block) {|arg, blk|
+        r = blk[0].list
+        while Ret === r[-1].value
+          r[-1] = r[-1].value[0]
+        end
+        return Block.unchecked(arg, blk) 
       }
       a
     end
@@ -278,25 +363,115 @@ module A
   
   def self.run(&b)
     u = MyIdentity.new
-    ";" + output(u.rewrite(Expr[Lam[b]])) + "();"
+    ";" + output(u.rewrite(Expr[Lam[b]]), 0) + "();"
   end
   
-  
   window = Var[:'window']
-  puts run {
-      a = Expr[3] + Expr[5]
-      Console.log a
-      a = Var.let ->x{
-          a = Var.let ->x{
-              a = Var.let ->x{
-                  x + 1
-              }
-              x + 2
+  class JSEnumerator
+    def initialize(a)
+      @a = a
+    end
+    def select(&b)
+      JSEnumerator.new(lambda{|f| @a.call(
+         lambda{|u| Expr.if(Expr[b].call(u)) {f.call u }} 
+      )})
+    end
+    def take_while(&b)
+      JSEnumerator.new(lambda{|f| @a.call(
+         lambda{|u| Expr.if(Expr[Extract[b.call(Extract[u])]]) {f.call u }.else{ Unbind[Break.unchecked()]  }} 
+      )})
+    end
+    def map(&b)
+       JSEnumerator.new(lambda{|f| @a.call(
+         lambda{|u| f.call(Expr[Extract[b.call(Extract[u])]]) } 
+      )})
+    end
+    def drop_while(&b)
+      JSEnumerator.new(lambda{|f| @a.call(
+         lambda{|u| Expr.if(Expr[Extract[b.call(Extract[u])]]) {Unbind[Continue.unchecked()] }.else{ f.call u  }} 
+      )})
+    end
+    def reduce(init = nil, &b)
+      if init 
+        result = Var.let init
+        each{|v|
+          result.assign(b.call(result, v))
+        }
+        result
+      else
+        first  = Var.let :true
+        result = Var.let :null
+        each{|v|
+          Expr.if(first) {
+            result.assign(v)
+            first.assign(:false)
+          }.else{
+            result.assign(b.call(result, v))
           }
-           x + 2
-      }
-      Console.log a
-      window.alert "Hello world"
+        }
+        result
+      end
+    end
+    
+    
+    
+    def index(a = nil, &bl)
+      result = Var.let 0
+      each do |b|
+        Expr.if(bl ? bl.call(b) : b == a) {
+            Unbind[Break.unchecked()]
+        } .else {
+            result.assign(result + 1)
+        }
+      end  
+      result
+    end
+    
+    def count(a = nil, &bl)
+      result = Var.let 0
+      each do |b|
+        Expr.if(bl ? bl.call(b) : b == a) {
+            result.assign(result + 1)
+        }
+      end  
+      result
+    end
+    
+    def all?(&bl)
+      result = Var.let :true
+      each do |b|
+        Expr.if(bl.call(b).not) {result.assign :false;  Unbind[Break.unchecked()]}
+      end
+      result
+    end
+    
+     def any?(&bl)
+      result = Var.let :false
+      each do |b|
+        Expr.if(bl.call(b).not) {result.assign :true;  Unbind[Break.unchecked()]}
+      end
+      result
+    end
+    
+    
+    def each(&b)
+      @a.call(b)
+    end
+  end
+  
+  def self.range(a, b)
+    JSEnumerator.new(lambda{|f| Expr.for(var = Var.let(a), var < b, var.assign(var + 1)) do f.call(var) end })
+  end
+  
+  def self.iterate(a, b)
+    JSEnumerator.new(lambda{|f| Expr.for(var = Var.let(a), Expr[:true], var.assign(b.call(var))) do f.call(var) end })
+  end
+  
+  puts run {
+    fs = Var.let Expr[:require].call('fs')
+    fs.writeFile('::::', 'Hello world') do |err|
+      Console.log err[:errno]
+    end
   }
 
 end
