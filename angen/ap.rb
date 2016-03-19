@@ -14,7 +14,6 @@ module Angen
     end
     
     Single  = I Object
-    
     Just    = T [Single]
     Nothing = T []  
     Maybe   = Just | Nothing  

@@ -472,13 +472,4 @@ module A
       Expr[sym].call(*a)
     end
   end
-  
-  puts run {
-    require = import :require
-    console = Expr[:console]
-    window = Expr[:window]
-    jq = window[:'$']
-    jq.("#text").val("Hello").fade_out
-  }
-
 end

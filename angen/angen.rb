@@ -15,6 +15,8 @@ module Angen
      def self.| rhs
        Angen.U [self, rhs]  
      end
+     
+     # ultrin
      class N < self
        def initialize(*rhs, &b)
          if !(rhs.size == 0 && !block_given? || rhs.size == 1 && rhs[0].class == N && !block_given?)
@@ -24,11 +26,20 @@ module Angen
        define_method(:rewrite) do |&b|
          b.call(self)
        end
+       def to_a
+         []
+       end
        define_method(:match) do |rhs, &b|
         if self.class == rhs
           b.call
         end
         self
+       end
+       (class << self; self; end).send(:define_method, :parse) do |str, &b|
+         [[N[], str]]
+       end
+       (class << self; self; end).send(:define_method,:gen) do |&b|
+         self[]
        end
      end
      
@@ -120,6 +131,24 @@ module Angen
         end
         self
       end
+      
+      (class << self; self; end).send(:define_method,:gen) do |&b|
+        self[*typelist.map{|x| x.gen(&b)}]
+      end
+      
+      (class << self; self; end).send(:define_method, :parse) do |str, &b|
+        r = [[[], str]]
+        typelist.each{|x|
+          r = r.flat_map{|lastmatch|
+            obj, str = lastmatch
+            u = x.parse(str, &b)
+            u.map{|newmatch|
+              [obj + (newmatch[0].is_a?(Array) ? newmatch[0] : [newmatch[0]]), newmatch[1]]
+            }
+          }
+        }
+        r.map{|x| [self[*x[0]], x[1] ]}
+      end
     end
   end
   
@@ -171,7 +200,26 @@ module Angen
       def [](i)
         self.list[i]
       end
-      
+      (class << self; self; end).send(:define_method, :parse) do |str, &b|
+        r = [[[], str]]
+        loop do
+          found = true
+          s = r.flat_map{|lastmatch|
+            obj, str = lastmatch
+            u = type.parse(str, &b)
+            found = false if u == []
+            u.map{|newmatch|
+              [obj + (newmatch[0].is_a?(Array) ? newmatch[0] : [newmatch[0]]), newmatch[1]]
+            }
+          }
+          break if !found
+          r.concat s
+        end
+        r.map{|x| [self[x[0]], x[1]]}
+      end
+      (class << self; self; end).send(:define_method,:gen) do |&b|
+        self[b.call(self)]
+      end
     end
   end
   
@@ -195,6 +243,8 @@ module Angen
           b.call(self.value)
         elsif self.class == rhs
           b.call(self)
+        elsif rhs === self
+          b.call(self)
         end
         self
       end
@@ -214,6 +264,12 @@ module Angen
         end
         raise TypeError.new("#{rhs.class} is not #{type}")
       end
+      (class << self; self; end).send(:define_method, :parse) do |str, &b|
+        b[str, self].map{|x| [self[x[0]], x[1]]}
+      end
+      (class << self; self; end).send(:define_method,:gen) do |&b|
+        self[b.call(self)]
+      end
     end
   end
   def R(outer, name)
@@ -231,6 +287,12 @@ module Angen
       end
       (class << self; self; end).send :define_method, :=== do |*rhs|
         outer.const_get(name).=== *rhs
+      end
+      (class << self; self; end).send(:define_method, :parse) do |str, &b|
+         outer.const_get(name).parse(str, &b)
+      end
+      (class << self; self; end).send(:define_method, :gen) do |&b|
+         outer.const_get(name).gen(&b)
       end
     end
   end
@@ -280,6 +342,24 @@ module Angen
           else Angen.U types + [rhs]
         end
       end
+      (class << self; self; end).send(:define_method, :parse) do |str, &b|
+        r = [[[], str]]
+        s = []
+        types.each{|x|
+          s.concat r.flat_map{|lastmatch|
+            obj, str = lastmatch
+            u = x.parse(str, &b)
+            u.map{|newmatch|
+              [obj + (newmatch[0].is_a?(Array) ? newmatch[0] : [newmatch[0]]), newmatch[1]]
+            }
+          }
+        }
+        s.map{|x| [self[*x[0]], x[1] ]}
+      end
+      (class << self; self; end).send(:define_method, :gen) do |&b|
+         self[types.sample.gen(&b)]
+      end
+       
     end
   end
   
