@@ -1,4 +1,4 @@
-require './angen.rb'
+require 'angen'
 module A
   extend Angen
   extend Angen::Util
@@ -467,11 +467,18 @@ module A
     JSEnumerator.new(lambda{|f| Expr.for(var = Var.let(a), Expr[:true], var.assign(b.call(var))) do f.call(var) end })
   end
   
-  puts run {
-    fs = Var.let Expr[:require].call('fs')
-    fs.writeFile('::::', 'Hello world') do |err|
-      Console.log err[:errno]
+  def self.import(sym)
+    (class << self; self; end).send :define_method, sym do |*a|
+      Expr[sym].call(*a)
     end
+  end
+  
+  puts run {
+    require = import :require
+    console = Expr[:console]
+    window = Expr[:window]
+    jq = window[:'$']
+    jq.("#text").val("Hello").fade_out
   }
 
 end
