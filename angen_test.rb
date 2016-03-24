@@ -1,5 +1,5 @@
 require 'angen'
-module A
+module JS
   extend Angen
   extend Angen::Util
   extend Angen::MonadicEnv
@@ -44,6 +44,7 @@ module A
          | ctor.DoWhile(Block, rec.Expr)                                \
          | ctore.Break()                                                \
          | ctore.Continue()                                             \
+         | ctor.Index(rec.Expr, rec.Expr)                               \
          
          
 # ------------- Impl -------------------------------------------------
@@ -99,7 +100,7 @@ module A
     def self.ret(rhs)
       Expr[Do[Statements[[Ret.unchecked(rhs)]]]]
     end
-    def >>(rhs)
+    def statement_append(rhs)
       r = to_statement
       u = Expr[rhs].to_statement
       r._0.list += u._0.list
@@ -142,7 +143,7 @@ module A
     end
 
     def method_missing(sym, *args, &b)
-      Expr.js(:"#{A.output self, 0}.#{sym}", *args.map{|x| x})
+      Expr.js(:"#{JS.output self, 0}.#{sym}", *args.map{|x| x})
     end
     def self.ffi(name, typeargs)
       t = Angen.T typeargs
@@ -151,6 +152,12 @@ module A
         Var.from(Expr.js(name, *args))
       }
     end
+    
+    
+    def index(arg, &block)
+      Unbind[Expr[Index[Extract[self], Extract[arg]]]]
+    end
+    
     
     def call(*args, &block)
       Expr.js(self.paren, *(args + Array(block)).map{|x| x})
@@ -176,10 +183,10 @@ module A
         x[0] == '_' ? x[1..-1] : x
       }
       env = MyIdentity.new
-      A.pushEnv env
+      JS.pushEnv env
       r = yield(*params.map{|x| Expr[Var[x]]})      
       re = Expr[Fn.unchecked(params, Expr[env.result].to_statement)]
-      A.popEnv
+      JS.popEnv
       re
     end
     
@@ -188,10 +195,10 @@ module A
         x[0] == '_' ? x[1..-1] : x
       }
       env = MyIdentity.new
-      A.pushEnv env
+      JS.pushEnv env
       r = yield(*params.map{|x| Expr[Var[x]]})      
       re = Expr[Block.unchecked(params, Expr[env.result].to_statement)]
-      A.popEnv
+      JS.popEnv
       re
     end
     
@@ -265,9 +272,13 @@ module A
     when Ret     then "return #{output expr.value[0], indent}"      
     when PExpr   then "(#{output expr.value[0], indent})"
     when Lam     then output Expr.fun(&expr.value.value), indent
-    when Arr     then "[" + expr.value.list.map{|x| output x}.join(",") + "]" 
+    when Arr     then "[" + expr.value.list.map{|x| output x, indent}.join(",") + "]" 
     when Break   then "break"
     when Continue   then "continue"
+    when Index  then 
+      expr.value.match(Index){|l, r|
+       return "#{output l, indent+1}[#{output r,indent+1}]"
+      }
     when For     then
       expr.value.match(For) do |expr1, expr2, expr3, bl|
         return "for(#{output expr1, indent+1};#{output expr2, indent+1};#{output expr3, indent+1})#{output Expr[bl], indent + 1}"
@@ -299,7 +310,7 @@ module A
   class VarA
     def output(indent = 0)
       match(VarA){|var, expr|
-         return "var #{var.value} = #{A.output expr, indent}"
+         return "var #{var.value} = #{JS.output expr, indent}"
       }
     end  
   end
@@ -317,25 +328,14 @@ module A
     Local.new
   end
   
-  class MyIdentity
-    def initialize
-      @things = []
-    end
-    def extract(a)
-      @things.delete_if{|x| x.hash == a.hash}
-      a
-    end
-    def unbind(a)
-      @things << a unless @things.index{|x| x.hash == a.hash}
-      a
-    end
-    def result
-      @things.map{|x| Expr[x].rewrite(&method(:rewrite))}.inject(:>>)
+  class MyIdentity < Angen::MonadicEnv::StatementEnv
+    def lift(x)
+      Expr[x]
     end
     def rewrite(a)
       a.match(Lam){|l|
         return Expr.fun(&l.value).rewrite(&method(:rewrite))
-      }.match(Statements){|*u|      
+      }.match(Statements){|u|      
         if !(Ret === u[-1].value)
           u[-1] = Expr[Ret.unchecked(u[-1])]
         end
@@ -366,6 +366,11 @@ module A
     ";" + output(u.rewrite(Expr[Lam[b]]), 0) + "();"
   end
   
+  def self.tree(&b)
+    u = MyIdentity.new
+    u.rewrite(Expr[Lam[b]])
+  end
+  
   window = Var[:'window']
   class JSEnumerator
     def initialize(a)
@@ -373,7 +378,7 @@ module A
     end
     def select(&b)
       JSEnumerator.new(lambda{|f| @a.call(
-         lambda{|u| Expr.if(Expr[b].call(u)) {f.call u }} 
+         lambda{|u| Expr.if(Expr[Extract[b.call(Extract[u])]]) {f.call u }} 
       )})
     end
     def take_while(&b)
@@ -412,8 +417,6 @@ module A
         result
       end
     end
-    
-    
     
     def index(a = nil, &bl)
       result = Var.let 0
@@ -467,9 +470,56 @@ module A
     JSEnumerator.new(lambda{|f| Expr.for(var = Var.let(a), Expr[:true], var.assign(b.call(var))) do f.call(var) end })
   end
   
+  
+  def self.R(a)
+    JSEnumerator.new(lambda{|f| arr = Var.let(a); Expr.for(var = Var.let(0), var < arr[:length], var.assign(var + 1)) do f.call(arr.index(var)) end })
+  end
+  
   def self.import(sym)
     (class << self; self; end).send :define_method, sym do |*a|
       Expr[sym].call(*a)
     end
   end
+
+
+ puts run {
+    # words = R(["looks", "feels", "acts"])
+    # words.each{|w|
+    #   Console.log w + " like Ruby"
+    # }
+     words = Var.let ["looks", "feels", "acts"], :words
+     words.forEach{|w| Console.log w + " like Ruby"}
+     Unbind[:undefined]
+ }
+=begin
+  extend Angen::Translate
+  a = %{
+    a = 3
+    b = 5
+    console.log a + b
+    console.log "Hello world"
+    console.log "Hello world1"
+  }
+ # p Ripper.sexp(a)
+  puts output translate(a){|name, *args|  
+    case name
+    when :program        then Expr[Fn.unchecked([], Do[Statements[args[0]]])]
+    when :command_call   then FCall[Expr[BExpr[:".", args[0], args[2]]], args[3]]
+    when :vcall          then args[0]
+    when :@ident         then Var[args[0].to_sym]
+    when :args_add_block then ArgList[args[0]]
+    when :string_literal then args[0]
+    when :string_content then args[0]
+    when :@tstring_content then Str[args[0]]
+    when :assign         then VarA[args[0], args[1]]
+    when :var_field      then args[0]
+    when :binary         then BExpr[args[1], args[0], args[2]]
+    when :var_ref        then args[0]
+    when :@int           then Num[args[0].to_i]
+    else name
+    end 
+  },0
+=end
+ 
+ 
 end

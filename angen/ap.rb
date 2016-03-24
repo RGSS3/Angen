@@ -112,6 +112,29 @@ module Angen
     def unbind(a)
       top.unbind(a)
     end
-   
+    
+    class StatementEnv
+        def initialize
+          @things = []
+        end
+        def extract(a)
+            @things.delete_if{|x| x.hash == a.hash}
+            a
+        end
+        def unbind(a)
+            @things << a unless @things.index{|x| x.hash == a.hash}
+            a
+        end
+        def result
+            @things.map{|x| lift(x).rewrite(&method(:rewrite))}.inject(:statement_append_)
+        end
+        def lift(x)
+          x
+        end 
+       
+        def rewrite(a)
+            a
+        end
+    end
   end
 end
