@@ -27,7 +27,6 @@ module Java
   }                            
            
   def self.def_out(*klasses, &b)
-    
     klasses.each{|klass|
       if klass < Angen::RootClass::U
         klass.send :define_method, :output do
@@ -55,7 +54,9 @@ module Java
   type.Int   Integer
   type.Flt   Float
   type.Ident Symbol
-  type.BinOp(/[\+\-\*\/%^&|\.]|\|\||\&\&|>|<|>=|<=|==|!=|>>|<</)
+  type.True  true
+  type.False false
+  type.BinOp(/[\+\-\*\/%^&|\.]|\|\||\&\&|>|<|>=|<=|==|!=|>>|<<|=/)
   type.PrefixUnOp(/[\+\-]|\+\+|--|!|~/)
   type.SuffixUnOp(/\+\+|--/)
   ctore.Typename(Ident)
@@ -64,10 +65,10 @@ module Java
   list.Modifiers Ident
   Annotation = ctore.Marker(Ident) 
   list.Annotations Annotation  
-  ctor.Decl Ident, rec.Expr, optional.InitValue(rec.Expr)
+  ctor.Decl Ident, rec.Expr, optional.InitValue(rec.Expr), rec.Modifiers
   list.ArgDecls Decl
   list.Implements Ident
-  Expr = Str | Int | Flt | Ident  | Decl                                   |  
+  Expr = Str | Int | Flt | Ident  | Decl | True | False                    |  
          ctor.BinaryExpr(BinOp, rec.Expr, rec.Expr)                        |
          ctor.PrefixUnary(PrefixUnOp, rec.Expr)                            |
          ctor.SuffixUnary(rec.Expr, SuffixUnOp)                            |
@@ -90,7 +91,7 @@ module Java
   
   def_out Expr  do  value.output                                                            end
   def_out Str, Int, Flt do value.inspect                                                    end
-  def_out BinOp, Ident, SuffixUnOp, PrefixUnOp do value.to_s                                end
+  def_out BinOp, Ident, SuffixUnOp, PrefixUnOp, True, False do value.to_s                                end
   def_out BinaryExpr do  |a, b, c| "#{b.output}#{a.output}#{c.output}"                      end
   def_out PrefixUnary do |a, b|    "#{a.output}#{b.output}"                                 end
   def_out Cast        do |a, b|    "(#{a.output})#{b.output}"                               end
@@ -101,6 +102,9 @@ module Java
   def_out Ternary do     |a, b, c| "(#{a.output}) ? (#{b.output}) : (#{c.output})"          end
   def_out ArgList  do    |list|    list.map(&:output).join(",")                             end
   def_out Statements do  |list|    list.map(&:output).join(";\n") + ";\n"                   end
+  def_out Java7Lam   do  |name, func|
+    "(new #{name.output}(){#{Indent.call{func.output}}\n})"
+  end
   class InitValue
     def output
       unless Angen::RootClass::N === value
@@ -110,22 +114,23 @@ module Java
       end
     end   
   end
-  def_out Decl do |type, name, init| "#{type.output} #{name.output}#{init.output}"  end
+  def_out Decl do |type, name, init, modifiers| "#{modifiers.output}#{type.output} #{name.output}#{init.output}"  end
   def_out FuncDecl do |an, mo, ret, name, args, body|
-        "#{an.output}\n#{mo.output} #{ret.output} #{name.output}(#{args.output})#{body.output}"
+        "#{an.output}\n#{mo.output}#{ret.output} #{name.output}(#{args.output})#{body.output}"
   end
   def_out ClassDecl do |an, mo, name, ext, impl, body|
-        "#{an.output}\n#{mo.output} class #{name.output} extends #{ext.output}#{impl.output}#{body.output}"
+        "#{an.output}\n#{mo.output}class #{name.output} extends #{ext.output}#{impl.output}#{body.output}"
   end
   def_out Annotations do |list|   list.map(&:output).join("\n") end
-  def_out Modifiers   do |list|   list.map(&:output).join(" ") end
+  def_out Modifiers   do |list|   list.map(&:output).join(" ") + (list.empty? ? "" : " ") end
   def_out ArgDecls    do |list|   list.map(&:output).join(",") end
   def_out Marker      do |val|    "@#{val.value}" end
   def_out Implements  do |list| list.empty? ? "" : " implements " + list.map(&:output).join(",")  end
   def_out Package     do |val| "package #{val.value}" end
   def_out Import      do |val| "import #{val.value}" end
   def_out Block       do |val| "{\n#{Indent.call{val.output}}\n}" end
-  
+  def_out If          do |cond, thenp, elsep| "if(#{cond.output})#{Indent.call{thenp.output}}#{Angen::RootClass::N === self[2].value ? "" : "else#{Indent.call{self[2].value.output}}"}" end
+    
 #-----------------------------------RUNNER------------------------------------------------
   
   class Expr
@@ -166,7 +171,7 @@ module Java
       end
     end
     def paren
-      effect{|s| Paren.unchecked(s) }
+      effect{|s| Expr[Paren.unchecked(s)] }
     end
     
     def effect(*a)
@@ -187,14 +192,22 @@ module Java
       self.value.match(Statements){|s| return Expr[Statements[s]] }
       return Expr[Statements[[self]]]
     end
-        
-    define_binop '+', '-', '*', '/', '==', '>=' , '=', '<=', '!=', '<', '>', '%', '^', '&', '&&', '|', '||', '>>', '<<'
-    define_prefixop '++' => 'inc_p', '--' => 'dec_p'
+       
+    def assign(rhs)
+      send "=", rhs
+    end
+    
+    def eq(rhs)
+      send "==", rhs
+    end
+      
+    define_binop '+', '-', '*', '/', '==', '>=' ,  '=', '<=', '!=', '<', '>', '%', '^', '&', '&&', '|', '||', '>>', '<<'
+    define_prefixop '++' => 'inc_p', '--' => 'dec_p', '!' => "not"
     define_suffixop '++' => 'inc_s', '--' => 'dec_s'
     @varid = 0
-    def self.var(type, value = Angen::RootClass::N[], id = :"__var$#{@varid+=1}")
+    def self.var(type, value = Angen::RootClass::N[], m = [], id = :"__var$#{@varid+=1}")
       x = Expr[id]
-      x.effect(type, value){|s, t, v| Expr[Decl[t,s,v]]}        
+      x.effect(type, value){|s, t, v| Expr[Decl[t,s,v,m]]}        
       x
     end
     
@@ -244,8 +257,8 @@ module Java
         self.ret = ret.to_sym
         self
       end
-      def arg(a, b, c = Angen::RootClass::N[])
-        (self.args ||= []) << Decl[a, b, c]
+      def arg(a, b, c = Angen::RootClass::N[], d = [])
+        (self.args ||= []) << Decl[a, b, c, d]
         self
       end
       def named(a)
@@ -288,6 +301,28 @@ module Java
       end
     end
     
+    def self.if(expr, &block)
+      Unbind[Expr[If.unchecked(Extract[expr], Extract[self.blk(&block)].value, Angen::RootClass::N[] )  ]  ]
+    end
+    
+    def self.for(expr1, expr2, expr3, &block)
+      Unbind[Expr[For.unchecked(Extract[expr1], Extract[expr2], Extract[expr3], Extract[self.blk(&block)].value) ] ]
+    end
+    
+    def java_value=(rhs)
+      assign rhs
+    end
+    def java_value   
+      self
+    end
+    def else(&block)
+      Extract[self]
+      self.value.match(If) do |expr, thenpart, elsepart|
+        return Unbind[Expr[If.unchecked(Extract[expr], Extract[thenpart], Block_[Extract[Expr.blk(&block)].value ])  ]  ]
+      end
+      raise 'not an If statement'
+    end
+    
     def self.blk(&bl)
       r = Java.tree(&bl).result
       Expr[Block.unchecked(r.to_statement_.value)]
@@ -301,6 +336,9 @@ module Java
       Unbind[Expr[ClassDecl.unchecked(kl.annotations || [], kl.modifiers || [], kl.name, kl.ext || :Object, kl.imp ||[], blk(&bl).value)]]
     end
     
+    def self.handler(name, f)
+      Unbind[Java7Lam.unchecked(Extract[name].to_sym, Extract[f].value)]
+    end
   end
   
   def self.name_alias(sym)
@@ -365,6 +403,20 @@ module Java
         class_exec &b
     }
   end
+  
+  def self.onClickListener(&b)
+    fn = Java::Expr::Fn.new.named(:onClick).as(:public).returns(:void)
+    types = [:View]
+    b.parameters.select{|x| x.last.to_s !~ /^_/}.each_with_index{|x, i|
+      fn.arg types[i], x.last
+    }
+    Expr.handler(:"OnClickListener", fn.create(&b))
+  end
+  
+  def self.let(*a, &b)
+    Java::Expr.var(*a, &b)
+  end
+  
   
 end
 

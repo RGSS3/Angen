@@ -189,7 +189,7 @@ module Shell
   
   define_shell :cd
   define_shell :ant
-  
+  define_shell :adb
 end
 
 

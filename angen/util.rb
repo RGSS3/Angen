@@ -77,9 +77,29 @@ module Angen
        end
     end
     
-    def import(a, b = nil)
-      reduce_with_object(a, :>>, b) do |f| yield f end
+    def def_out(*klasses, &b)
+      klasses.each{|klass|
+      if klass < Angen::RootClass::U
+        klass.send :define_method, :output do
+          value.output
+        end
+      elsif klass < Angen::RootClass::T || klass < Angen::RootClass::A 
+        klass.send :define_method, :output do
+          match(klass) do |*a| return instance_exec(*a, &b) end
+        end
+      elsif klass < Angen::RootClass::I
+        klass.send :define_method, :output do
+          instance_exec value, &b
+        end
+       elsif klass < Angen::RootClass::L
+        klass.send :define_method, :output do
+          instance_exec list, &b
+        end
+       end
+      }
     end
+ 
+   
     
     
   end
