@@ -5,7 +5,7 @@ Ange for Another Generator.
 Current Test Instructions
 -------------
 Requirements:
-* Win32 Env
+* Win32 Env(required only by shell\_android\_test.rb)
 * ADK
 * Ant
 * JDK
