@@ -91,7 +91,7 @@ module Java
   
   def_out Expr  do  value.output                                                            end
   def_out Str, Int, Flt do value.inspect                                                    end
-  def_out BinOp, Ident, SuffixUnOp, PrefixUnOp, True, False do value.to_s                                end
+  def_out BinOp, Ident, SuffixUnOp, PrefixUnOp, True, False do value.to_s                   end
   def_out BinaryExpr do  |a, b, c| "#{b.output}#{a.output}#{c.output}"                      end
   def_out PrefixUnary do |a, b|    "#{a.output}#{b.output}"                                 end
   def_out Cast        do |a, b|    "(#{a.output})#{b.output}"                               end
@@ -130,7 +130,6 @@ module Java
   def_out Import      do |val| "import #{val.value}" end
   def_out Block       do |val| "{\n#{Indent.call{val.output}}\n}" end
   def_out If          do |cond, thenp, elsep| "if(#{cond.output})#{Indent.call{thenp.output}}#{Angen::RootClass::N === self[2].value ? "" : "else#{Indent.call{self[2].value.output}}"}" end
-    
 #-----------------------------------RUNNER------------------------------------------------
   
   class Expr
@@ -206,8 +205,8 @@ module Java
     define_suffixop '++' => 'inc_s', '--' => 'dec_s'
     @varid = 0
     def self.var(type, value = Angen::RootClass::N[], m = [], id = :"__var$#{@varid+=1}")
-      x = Expr[id]
-      x.effect(type, value){|s, t, v| Expr[Decl[t,s,v,m]]}        
+      x = Expr[Ident[id]]
+      x.effect(type, value){|s, t, v| Expr[Decl[t,s,InitValue[v],m]]}        
       x
     end
     

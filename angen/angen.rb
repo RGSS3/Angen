@@ -1,7 +1,13 @@
 module Angen
+  Options = {:msg => '', :opt => ''}
   class RootClass
      def self.[](*a)
         new(*a)
+     end
+     if Options[:opt]
+       def raise(*)
+         super()
+       end
      end
      def self.===(*rhs)
        return true if rhs.length == 1 && rhs[0].class == self
@@ -13,14 +19,13 @@ module Angen
        end
      end
      def self.| rhs
-       Angen.U [self, rhs]  
+       (Angen.U [self]) | rhs  
      end
-     
      # ultrin
      class N < self
        def initialize(*rhs, &b)
          if !(rhs.size == 0 && !block_given? || rhs.size == 1 && rhs[0].class == N && !block_given?)
-           raise "Null type has value"
+           raise (Options[:msg] || "Null type has value")
          end
        end
        def self.hash
@@ -97,14 +102,20 @@ module Angen
       end
       self.typelist = typelist
       self.namelist = namelist
-      def self.to_s
-        super['#'] ? 
-          "(#{typelist.map{|x| x.to_s}.join(",")})" : 
-          super
-      end
-      define_method(:to_s) do
+      if Options[:opt]
+        def self.to_s; ''; end
+        def to_s; ''; end
+      else
+        def self.to_s
+          super['#'] ? 
+            "(#{typelist.map{|x| x.to_s}.join(",")})" : 
+            super
+        end
+        define_method(:to_s) do
           "#{self.class}[#{namelist.map{|x| send(x)}.join(",")}]"
+        end
       end
+      
       define_method(:to_a) do
         [self.class] + namelist.map{|x| send(x).to_a}
       end
@@ -112,19 +123,20 @@ module Angen
       typelist.zip(namelist).each{|v|
         type, name = v
         define_method(:"#{name}=") do |rhs|
-          raise TypeError.new("#{name} #{rhs} is not a #{type} in #{self}") if !(type === rhs)
+          raise (Options[:msg] || TypeError.new("#{name} #{rhs} is not a #{type} in #{self}")) if !(type === rhs) 
           instance_variable_set(:"@#{name}", type[rhs])
         end
       }
       define_method(:initialize) do |*rhs|
         if rhs.length == 1 && rhs[0].class == self.class
-         namelist.each{|x|
-           self.send("#{x}=", rhs[0].send(x))
-         } 
+         namelist.each{|x| instance_variable_set(:"@#{x}", rhs[0].send(x))} 
          return
        end
-        raise ArgumentError.new("Can't implicit making struct when explicit is set, #{self.class}") if explicit
-        raise ArgumentError.new("Wrong number of Arguments #{self.class.to_s} #{rhs.length} #{typelist.length}") if rhs.length != typelist.length
+        raise (Options[:msg] || ArgumentError.new("Can't implicit making struct when explicit is set, #{self.class}")) if explicit 
+        raise (Options[:msg] || ArgumentError.new("Wrong number of Arguments #{self.class.to_s} #{rhs.length} #{typelist.length}")) if rhs.length != typelist.length
+        rhs.each_with_index{|x, i|
+          raise (Options[:msg] || TypeError.new( "#{namelist[i]} #{rhs} is not a #{typelist[i]} in #{self}"))  if !(typelist[i] === x)
+        }
         rhs.each_with_index{|x, i|
           self.send("#{namelist[i]}=", x)
         }
@@ -149,10 +161,14 @@ module Angen
       
       define_method(:match) do |rhs, &b|
         if self.class == rhs
-         b.call(*namelist.map{|i| send(i) })
+          b.call(*namelist.map{|i| send(i) })
         end
         self
       end
+      define_method(:all) do
+        namelist.map{|i| send(i) }
+      end
+      
       
       (class << self; self; end).send(:define_method,:gen) do |&b|
         self[*typelist.map{|x| x.gen(&b)}]
@@ -191,13 +207,18 @@ module Angen
       end
       self.typelist = typelist
       self.namelist = namelist
-      def self.to_s
-        super['#'] ? 
-          "(@(#{typelist.map{|x| x.to_s}.join(",")})" : 
-          super
-      end
-      define_method(:to_s) do
-          "#{self.class}[#{namelist.map{|x| send(x)}.join(",")}]"
+       if Options[:opt]
+        def self.to_s; ''; end
+        def to_s; ''; end
+      else
+        def self.to_s
+            super['#'] ? 
+            "(@(#{typelist.map{|x| x.to_s}.join(",")})" : 
+            super
+        end
+        define_method(:to_s) do
+            "#{self.class}[#{namelist.map{|x| send(x)}.join(",")}]"
+        end
       end
       define_method(:to_a) do
         [self.class] + namelist.map{|x| send(x).to_a}
@@ -206,7 +227,7 @@ module Angen
       typelist.zip(namelist).each{|v|
         type, name = v
         define_method(:"#{name}=") do |rhs|
-          raise TypeError.new("#{name} #{rhs} is not a #{type} in #{self}") if !(type === rhs)
+          raise (Options[:msg] || TypeError.new("#{name} #{rhs} is not a #{type} in #{self}")) if !(type === rhs)
           instance_variable_set(:"@#{name}", type[rhs])
         end
       }
@@ -217,12 +238,15 @@ module Angen
          } 
          return
        end
-     
-        raise ArgumentError.new("Can't implicit making struct when explicit is set, #{self.class}") if explicit
-        raise ArgumentError.new("Wrong number of Arguments #{self.class.to_s} #{rhs.length} #{typelist.length}") if rhs.length != typelist.length
+        raise (Options[:msg] || ArgumentError.new("Wrong number of Arguments #{self.class.to_s} #{rhs.length} #{typelist.length}")) if (rhs.length != typelist.length)
+        raise (Options[:msg] || ArgumentError.new("Can't implicit making struct when explicit is set, #{self.class}")) if explicit 
+        rhs.each_with_index{|x, i|
+          raise (Options[:msg] || TypeError.new("#{namelist[i]} #{rhs} is not a #{typelist[i]} in #{self}"))  if !(typelist[i] === x)
+        }
         rhs.each_with_index{|x, i|
           self.send("#{namelist[i]}=", x)
         }
+       
       end
       (class << self; self; end).send :define_method, :unchecked do |*rhs|
         allocate.instance_eval do
@@ -247,6 +271,10 @@ module Angen
          b.call(*namelist.map{|i| send(i) })
         end
         self
+      end
+      
+      define_method(:all) do
+        namelist.map{|i| send(i) }
       end
       
       (class << self; self; end).send(:define_method,:gen) do |&b|
@@ -282,13 +310,18 @@ module Angen
       end
       attr_accessor :list
       attr_accessor :type
-      def to_s
-        "#{self.class}[#{self.list.join(",")}]" 
-      end
-      def self.to_s
-        super['#'] ? 
-        "[#{self.type.to_s}]" :  
-        super
+       if Options[:opt]
+        def self.to_s; ''; end
+        def to_s; ''; end
+      else
+        def to_s
+            "#{self.class}[#{self.list.join(",")}]" 
+        end
+        def self.to_s
+            super['#'] ? 
+            "[#{self.type.to_s}]" :  
+            super
+        end
       end
       def to_a
         [self.class] + self.list.map{|x| x.to_a}
@@ -298,11 +331,11 @@ module Angen
           self.list = rhs.list[0..-1]
           return
         end
-        self.list = []
-        raise TypeError, "Not an array for #{rhs.inspect} in #{self.class}" if !(Array === rhs)
+        raise (Options[:msg] || TypeError.new("Not an array for #{rhs.inspect} in #{self.class}")) if !(Array === rhs)
         rhs.each_with_index{|x, i|
-          raise TypeError.new("#{type} mismatched #{x.class} #{Array === x ? x : ''} for #{self.class}") if !(type === x)
+          raise (Options[:msg] || TypeError.new("#{type} mismatched #{x.class} #{Array === x ? x : ''} for #{self.class}")) if !(type === x)  
         }
+        self.list = [] 
         self.type = type
         self.list = rhs.map{|x| type.new(x) }
       end
@@ -365,16 +398,22 @@ module Angen
       def self.eql?(rhs)
         (rhs <= RootClass::I)  && self.type.eql?(rhs.type)
       end
-      def to_s
-        "#{self.class.to_s}[#{@value}]"
+       if Options[:opt]
+        def self.to_s; ''; end
+        def to_s; ''; end
+      else
+        def to_s
+            "#{self.class.to_s}[#{@value}]"
+        end
+      
+        def self.to_s
+            super['#'] ? 
+            "#{self.type.to_s}" : 
+            super
+        end
       end
       def to_a
         [@value]
-      end
-      def self.to_s
-        super['#'] ? 
-        "#{self.type.to_s}" : 
-        super
       end
       define_method(:match) do |rhs, &b|
         if self.type == rhs
@@ -400,7 +439,7 @@ module Angen
           self.value = rhs
           return
         end
-        raise TypeError.new("#{rhs.class} is not #{type}")
+        raise (Options[:msg] || TypeError.new("#{rhs.class} is not #{type}"))
       end
       (class << self; self; end).send(:define_method, :parse) do |str, &b|
         b[str, self].map{|x| [self[x[0]], x[1]]}
@@ -447,34 +486,69 @@ module Angen
       def to_a
         @value.to_a
       end
-      def self.to_s
-        super['#'] ? 
-        "#{self.types.map{|x| x.to_s}.join(" | ")}" : 
-        super
+       if Options[:opt]
+        def self.to_s; ''; end
+        def to_s; ''; end
+      else
+        def self.to_s
+            super['#'] ? 
+            "#{self.types.map{|x| x.to_s}.join(" | ")}" : 
+            super
+        end
+        def to_s
+          "#{self.class.to_s}[#{@value}]"
+        end
       end
       define_method(:match) do |rhs, &b|
         @value.match(rhs, &b)
         self
       end
-     
+      
       attr_accessor :type, :value
       define_method(:rewrite) do |&b|
         self.class[@value.rewrite(&b)]
       end
+      (class << self; self; end).send :define_method, :deduce do |rhs|
+       types.each{|t|
+          begin
+            t === rhs
+            return t
+          rescue
+            
+          end
+        }
+      end
+      const_set :CACHE, {}
       define_method(:initialize) do |rhs|
         if rhs.class == self.class
           @type = rhs.type
           @value = rhs.value
           return
-        end
+        end        
         types.each{|t|
-          if t === rhs
+          if t == rhs.class
             @type  = t
-            @value = t.new(rhs)
+            @value = rhs
             return
           end
         }
-        raise TypeError.new("No such subtype #{rhs.inspect} in #{self.class}")
+        types.each{|t|
+          if t <= RootClass::I && t === rhs
+            @type = t
+            @value = t.new(rhs)
+            return 
+          end
+        }
+        types.each{|t|
+          begin
+            @type  = t
+            @value = t.new(rhs)
+            return
+          rescue
+
+          end
+        }
+        raise (Options[:msg] || TypeError.new("No such subtype #{rhs.inspect} in #{self.class}"))  
       end
       (class << self; self; end).send :define_method, "|" do |rhs|
         case 

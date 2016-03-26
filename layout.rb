@@ -51,7 +51,7 @@ module Layout
     def_out Attr do |s|
         s.empty? ? "" : " " + 
         s.map{|k, v|
-        "#{XMLAttr[k].output} = #{XMLAttr[v].output}"
+        "#{XMLAttr[AttrName[k.to_sym]].output} = #{XMLAttr[AttrValue[v.to_s]].output}"
         }.join(" ")
     end
     def_out XMLAttr do |s| value.output end

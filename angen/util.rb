@@ -81,19 +81,19 @@ module Angen
       klasses.each{|klass|
       if klass < Angen::RootClass::U
         klass.send :define_method, :output do
-          value.output
+          @output ||= value.output
         end
       elsif klass < Angen::RootClass::T || klass < Angen::RootClass::A 
         klass.send :define_method, :output do
-          match(klass) do |*a| return instance_exec(*a, &b) end
+          @output ||= instance_exec(*all, &b)
         end
       elsif klass < Angen::RootClass::I
         klass.send :define_method, :output do
-          instance_exec value, &b
+          @output ||= instance_exec value, &b
         end
        elsif klass < Angen::RootClass::L
         klass.send :define_method, :output do
-          instance_exec list, &b
+          @output ||= instance_exec list, &b
         end
        end
       }

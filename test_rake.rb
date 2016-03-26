@@ -14,11 +14,11 @@ task :init do
   }
 end
 task :edit do
-
-   
+ti = Time.now
   Java.write PACKAGE, FILE do
     Control = lambda{|type, id|lambda{let type, Java::Expr[:this].findViewById(Java::Expr.static :R, :id, id).cast(type), [:final]}}
     btn = {};button = lambda{|*a|id = Layout.hbutton(*a);btn[a[0]] = Control[:Button, id];id};textEdit = nil
+    t = Time.now
     Layout.write LAYOUT do
        topnode(:vertical, :layout_width => "match_parent", :layout_height => "match_parent") do
             horizontal{textEdit = Control[:EditText, htext("")] }
@@ -27,9 +27,10 @@ task :edit do
             horizontal{["M+", "M-", "MR", "MC"].each{|x| button[x]   } }
        end
     end
+    puts "Layout used #{Time.now - t}"
     import_android "app", "os", "widget", "view", "view.View"
     activity("arious"){
-        state, op, last, flt, op2, eqpress, mem = let(:Boolean, :true), let(:int, 0), let(:float, 0), Java::Expr[:Float], let(:float, 0), let(:Boolean, false), let(:float, 0)
+        state, op, last, flt, op2, eqpress, mem = let(:Boolean, true), let(:int, 0), let(:float, 0), Java::Expr[:Float], let(:float, 0), let(:Boolean, false), let(:float, 0)
         onCreate{|_super, _this, saved| 
           _super.onCreate saved;_this.setContentView(Java::Expr.static(:R, :layout, :main))
           t = textEdit[];
@@ -63,6 +64,7 @@ task :edit do
         }
       }      
   end
+  puts "Java used #{Time.now - ti}"
 end
 task :compile => APK
 file APK => FILE  do 
