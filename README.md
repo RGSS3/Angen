@@ -6,7 +6,7 @@ Current Test Instructions
 -------------
 Requirements:
 * Win32 Env(required only by shell\_android\_test.rb)
-* ADK
+* ADK (with android-10 installed)
 * Ant
 * JDK
 
